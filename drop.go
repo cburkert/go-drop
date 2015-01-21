@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -76,7 +75,7 @@ func (server *DropServer) submit(drop Drop, data io.Reader) error {
 		return err
 	}
 	defer file.Close()
-	msg.Path = filepath.Join(server.BaseDir, file.Name())
+	msg.Path = file.Name()
 	_, err = io.CopyN(file, data, maxMsgSize+1)
 	if err != io.EOF {
 		os.Remove(msg.Path)
