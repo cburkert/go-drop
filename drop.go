@@ -101,3 +101,26 @@ func (server *DropServer) request(drop Drop, since time.Time) ([]string, error) 
 	})
 	return paths, nil
 }
+
+func (server *DropServer) cleanOlder(newEventHorizon *time.Time) (int, error) {
+	numDiscarded := 0
+	msgRing := server.MsgRing
+	first := true
+	for ; first || msgRing != server.MsgRing; msgRing = msgRing.Next() {
+		first = false
+		msg, ok := msgRing.Value.(Message)
+		if ok && (newEventHorizon == nil || msg.Timestamp.Before(*newEventHorizon)) {
+			msgRing.Value = nil
+			err := msg.discard()
+			if err != nil {
+				return numDiscarded, err
+			}
+			numDiscarded++
+		}
+	}
+	return numDiscarded, nil
+}
+
+func (server *DropServer) clean() (int, error) {
+	return server.cleanOlder(nil)
+}
