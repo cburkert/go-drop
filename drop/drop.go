@@ -38,6 +38,10 @@ type message struct {
 	path      string
 }
 
+func (msg *message) prefix() string {
+	return fmt.Sprintf("%v_", msg.drop.Id)
+}
+
 func (msg *message) discard() error {
 	return os.Remove(msg.path)
 }
@@ -83,7 +87,7 @@ func (server *DropManager) Submit(drop Drop, data io.Reader) error {
 		drop:      drop,
 		timestamp: time.Now(),
 	}
-	file, err := ioutil.TempFile(server.baseDir, "")
+	file, err := ioutil.TempFile(server.baseDir, msg.prefix())
 	if err != nil {
 		return err
 	}
