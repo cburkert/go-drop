@@ -1,6 +1,7 @@
 package drop
 
 import (
+	"io"
 	"io/ioutil"
 	"strconv"
 	"strings"
@@ -9,8 +10,8 @@ import (
 )
 
 func TestEmpty(t *testing.T) {
-	server := NewServer(5, "/tmp")
-	paths, err := server.request(Drop{"23"}, time.Now())
+	server := NewManager(5, "/tmp")
+	paths, err := server.Request(Drop{"23"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,12 +26,12 @@ type testParam struct {
 	numSub, numGot int
 }
 
-func submitAndCheck(t *testing.T, server *DropServer, data []testParam) {
+func submitAndCheck(t *testing.T, server *DropManager, data []testParam) {
 	since := time.Now()
 	// submit
 	for _, req := range data {
 		for i := 0; i < req.numSub; i++ {
-			err := server.submit(Drop{req.dropId}, strings.NewReader(req.dropId+strconv.Itoa(i)))
+			err := server.Submit(Drop{req.dropId}, strings.NewReader(req.dropId+strconv.Itoa(i)))
 			if err != nil {
 				t.Error(err)
 			}
@@ -38,7 +39,7 @@ func submitAndCheck(t *testing.T, server *DropServer, data []testParam) {
 	}
 	// request
 	for _, req := range data {
-		paths, err := server.request(Drop{req.dropId}, since)
+		paths, err := server.RequestSince(Drop{req.dropId}, since)
 		if err != nil {
 			t.Error(err)
 		}
@@ -66,7 +67,7 @@ func TestAlmostFull(t *testing.T) {
 		{"bar", 1, 1},
 		{"nil", 0, 0},
 	}
-	server := NewServer(5, "/tmp")
+	server := NewManager(5, "/tmp")
 	submitAndCheck(t, &server, params)
 	discarded, err := server.clean()
 	if err != nil {
@@ -82,7 +83,7 @@ func TestOverfill(t *testing.T) {
 		{"foo", 3, 2},
 		{"bar", 1, 1},
 	}
-	server := NewServer(3, "/tmp")
+	server := NewManager(3, "/tmp")
 	submitAndCheck(t, &server, params)
 	discarded, err := server.clean()
 	if err != nil {
@@ -102,7 +103,7 @@ func TestTwoPass(t *testing.T) {
 		{"foo", 2, 2},
 		{"bar", 0, 0},
 	}
-	server := NewServer(4, "/tmp")
+	server := NewManager(4, "/tmp")
 	submitAndCheck(t, &server, params1)
 	// second request should not return the message submitted in pass one due to timestamp
 	submitAndCheck(t, &server, params2)
@@ -112,5 +113,54 @@ func TestTwoPass(t *testing.T) {
 	}
 	if discarded != 4 {
 		t.Errorf("Failed to cleanup all message. Discarded %v.", discarded)
+	}
+}
+
+type mockReader struct {
+	toRead int
+}
+
+func (m *mockReader) Read(p []byte) (int, error) {
+	// don't actually deliver any data - size matters!
+	if m.toRead == 0 {
+		return 0, io.EOF
+	}
+	var nowRead int
+	if m.toRead > cap(p) {
+		nowRead = cap(p)
+	} else {
+		nowRead = m.toRead
+	}
+	m.toRead -= nowRead
+	return nowRead, nil
+}
+
+func TestMsgSizeOk(t *testing.T) {
+	server := NewManager(2, "/tmp")
+	err := server.Submit(Drop{"foo"}, &mockReader{MaximumMessageSize})
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMsgSizeTooLarge(t *testing.T) {
+	server := NewManager(2, "/tmp")
+	err := server.Submit(Drop{"foo"}, &mockReader{MaximumMessageSize + 1})
+	if _, ok := err.(MessageSizeExceededError); !ok {
+		if err != nil {
+			t.Error(err)
+		}
+		t.Error("Server should have rejected too large message")
+	}
+}
+
+func TestDropIdVerification(t *testing.T) {
+	goodDrop := Drop{"abcdefghijklmnopqrstuvwxyzabcdefgworkingUrl"}
+	if !goodDrop.Verify() {
+		t.Error("failed to verify good id")
+	}
+	badShortDrop := Drop{"tooshort"}
+	if badShortDrop.Verify() {
+		t.Error("Failed to detect too short id")
 	}
 }
