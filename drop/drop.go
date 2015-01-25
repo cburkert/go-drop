@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -51,35 +52,17 @@ type DropManager struct {
 	baseDir    string
 	msgRing    *ring.Ring
 	submitChan chan message
+	mutexRing  sync.Mutex
 }
 
 func NewManager(capacity int, baseDir string) DropManager {
 	msgRing := ring.New(capacity)
 	return DropManager{
-		capacity:   capacity,
-		baseDir:    baseDir,
-		msgRing:    msgRing,
-		submitChan: launchRingManager(msgRing),
+		capacity:  capacity,
+		baseDir:   baseDir,
+		msgRing:   msgRing,
+		mutexRing: sync.Mutex{},
 	}
-}
-
-func launchRingManager(msgRing *ring.Ring) chan message {
-	submitChan := make(chan message)
-	go func() {
-		for {
-			msg := <-submitChan
-			oldMsg, oldExisted := msgRing.Value.(message)
-			msgRing.Value = msg
-			if oldExisted {
-				err := oldMsg.discard()
-				if err != nil {
-					log.Panic("Failed to discard message")
-				}
-			}
-			msgRing = msgRing.Next()
-		}
-	}()
-	return submitChan
 }
 
 func (server *DropManager) Submit(drop Drop, data io.Reader) error {
@@ -103,7 +86,20 @@ func (server *DropManager) Submit(drop Drop, data io.Reader) error {
 			return err
 		}
 	}
-	server.submitChan <- msg
+
+	// update ring
+	server.mutexRing.Lock()
+	oldMsg, oldExisted := server.msgRing.Value.(message)
+	server.msgRing.Value = msg
+	server.msgRing = server.msgRing.Next()
+	server.mutexRing.Unlock()
+
+	if oldExisted {
+		err := oldMsg.discard()
+		if err != nil {
+			log.Panic("Failed to discard message")
+		}
+	}
 
 	return nil
 }
