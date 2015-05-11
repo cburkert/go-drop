@@ -1,9 +1,9 @@
 package main
 
 import (
-	"drop/drop"
 	"flag"
 	"fmt"
+	"github.com/cburkert/go-drop/drop"
 	"net/http"
 )
 
